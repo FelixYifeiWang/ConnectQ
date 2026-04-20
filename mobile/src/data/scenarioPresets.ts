@@ -128,8 +128,22 @@ export const SCENARIO_PRESETS: ScenarioPreset[] = [
     id: "live",
     label: "LIVE",
     live: true,
+    bodyMap: true,
     metricBaselines: {},
-    expedition: {},
+    expedition: {
+      name: "Live Session",
+      mountain: "Live Session",
+      campName: "\u2014",
+      currentAltitude: 0,
+      targetAltitude: 0,
+      baseAltitude: 0,
+      day: 1,
+      totalDays: 1,
+      weatherCondition: "\u2014",
+      windDirection: "\u2014",
+      sunrise: "\u2014",
+      sunset: "\u2014",
+    },
   },
 
   // 1 — Onboarding questionnaire

@@ -20,8 +20,8 @@ const COMBINED_ID = "heart-rate+hrv";
 const INDICATORS: Indicator[] = [
   { metricId: COMBINED_ID, label: "", x: 56, y: 18, size: 44, side: "right" },
   { metricId: "blood-oxygen", label: "SpO\u2082", x: 70, y: 88, size: 36, side: "right" },
-  { metricId: "core-temp", label: "Core", x: 50, y: 50, size: 48, side: "left" },
-  { metricId: "skin-temp", label: "Skin", x: 36, y: 23, size: 34, side: "left" },
+  { metricId: "core-temp", label: "Temp", x: 50, y: 50, size: 48, side: "left" },
+  { metricId: "sweat", label: "Sweat", x: 36, y: 23, size: 34, side: "left" },
 ];
 
 const statusColor = {
@@ -29,6 +29,8 @@ const statusColor = {
   warning: "#FBBF24",
   critical: "#F87171",
 };
+
+const PLACEHOLDER_COLOR = "#475569";
 
 type Props = {
   metrics: Metric[];
@@ -62,7 +64,11 @@ export default function BodyMap({ metrics }: Props) {
         const hrv = isCombined ? metricsById["hrv"] : null;
         const metric = isCombined ? hr : metricsById[ind.metricId];
         if (!metric) return null;
-        const color = statusColor[metric.status] ?? statusColor.normal;
+        const combinedPlaceholder = isCombined && (!!hr?.placeholder || !!hrv?.placeholder);
+        const isPlaceholder = isCombined ? combinedPlaceholder : !!metric.placeholder;
+        const color = isPlaceholder
+          ? PLACEHOLDER_COLOR
+          : statusColor[metric.status] ?? statusColor.normal;
         const isLeft = ind.side === "left";
         const glowSize = ind.size;
 
@@ -104,19 +110,23 @@ export default function BodyMap({ metrics }: Props) {
             ]}>
               {isCombined && hr && hrv ? (
                 <>
-                  <Text style={[styles.labelName, { color }]} numberOfLines={1}>HR</Text>
-                  <Text style={styles.labelValue} numberOfLines={1}>{hr.value}</Text>
+                  <Text style={[styles.labelName, { color: hr.placeholder ? PLACEHOLDER_COLOR : color }]} numberOfLines={1}>HR</Text>
+                  <Text style={styles.labelValue} numberOfLines={1}>{hr.placeholder ? "\u2014" : hr.value}</Text>
                   <Text style={styles.labelUnit} numberOfLines={1}>{hr.unit}</Text>
                   <Text style={styles.divider}>|</Text>
-                  <Text style={[styles.labelName, { color: statusColor[hrv.status] ?? color }]} numberOfLines={1}>HRV</Text>
-                  <Text style={styles.labelValue} numberOfLines={1}>{hrv.value}</Text>
+                  <Text style={[styles.labelName, { color: hrv.placeholder ? PLACEHOLDER_COLOR : (statusColor[hrv.status] ?? color) }]} numberOfLines={1}>HRV</Text>
+                  <Text style={styles.labelValue} numberOfLines={1}>{hrv.placeholder ? "\u2014" : hrv.value}</Text>
                   <Text style={styles.labelUnit} numberOfLines={1}>{hrv.unit}</Text>
                 </>
               ) : (
                 <>
                   <Text style={[styles.labelName, { color }]} numberOfLines={1}>{ind.label}</Text>
                   <Text style={styles.labelValue} numberOfLines={1}>
-                    {metric.precision ? metric.value.toFixed(metric.precision) : metric.value}
+                    {metric.placeholder
+                      ? "\u2014"
+                      : metric.precision
+                        ? metric.value.toFixed(metric.precision)
+                        : metric.value}
                   </Text>
                   <Text style={styles.labelUnit} numberOfLines={1}>{metric.unit}</Text>
                 </>

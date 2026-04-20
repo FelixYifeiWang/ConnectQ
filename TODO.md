@@ -7,4 +7,4 @@
 
 ## Mobile
 
-- [ ] Map additional sensors to LIVE metrics. Moisture is already parsed into `SensorReport` but not yet bound to a dashboard card; all non-core-temp metrics render `—`.
+- [ ] Wire sensors for the remaining LIVE metrics. Thermistor → Temperature and moisture → Sweat are live; Heart Rate, SpO₂, and HRV still render `—` until pulse-ox / ECG hardware is added.

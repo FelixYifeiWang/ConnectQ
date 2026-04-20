@@ -76,7 +76,7 @@ Features:
 2. `cp mobile/.env.example mobile/.env` and set `EXPO_PUBLIC_BOARD_HOST` to that IP (or `<ip>:<port>`). `mobile/.env` is gitignored.
 3. `cd mobile && npm run start`. The LIVE page polls `GET /report` every second, parses the plain-text format, and updates metric cards. Fails fast (2.5 s timeout) when the board isn't reachable, dropping the chip back to `OFFLINE`.
 
-Today the only real mapping is **thermistor → Core Temp**. Moisture is parsed into `SensorReport` but not yet bound to a dashboard card; everything else renders `—` until a sensor is added. To bind a new metric, extend `applyReport` in `mobile/src/hooks/useLiveData.ts`.
+Board-backed metrics today: **thermistor → Temperature** and **moisture → Sweat**. Heart Rate / SpO₂ / HRV render `—` until those sensors are added. To bind a new metric, extend `liveValueFor` in `mobile/src/hooks/useLiveData.ts`.
 
 ## Project structure
 

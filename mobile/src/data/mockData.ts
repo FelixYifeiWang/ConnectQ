@@ -21,7 +21,7 @@ export type Metric = {
   icon: string;
   accentColor: string;
   trend: number[];
-  section: "vitals" | "body" | "environment" | "motion";
+  section: "vitals" | "body";
   status: MetricStatus;
   range?: MetricRange;
   subtitle?: string;
@@ -140,10 +140,10 @@ const rawMetrics: Omit<Metric, "status">[] = [
     range: { min: 10, max: 100, warningLow: 25, criticalLow: 15 },
   },
 
-  // ── Body (Skin temp · Core temp estimator) ──
+  // ── Body (Core temp · Sweat humidity) ──
   {
     id: "core-temp",
-    label: "Core Temp",
+    label: "Temperature",
     value: 36.4,
     unit: "°C",
     icon: "🌡️",
@@ -155,78 +155,16 @@ const rawMetrics: Omit<Metric, "status">[] = [
     range: { min: 34, max: 40, warningLow: 36.0, criticalLow: 35.0, warningHigh: 38.5, criticalHigh: 39.5 },
   },
   {
-    id: "skin-temp",
-    label: "Skin Temp",
-    value: 28.1,
-    unit: "°C",
-    icon: "🤚",
-    accentColor: "#FFBB54",
-    trend: [28.5, 28.3, 28.6, 28.2, 28.4, 28.0, 28.1],
+    id: "sweat",
+    label: "Sweat",
+    value: 32,
+    unit: "%",
+    icon: "💧",
+    accentColor: "#60A5FA",
+    trend: [30, 31, 33, 32, 34, 33, 32],
     section: "body",
-    modes: ["extreme"],
-    range: { min: 15, max: 37, warningLow: 27, criticalLow: 22 },
-  },
-
-  // ── Environment (Barometric · Ambient temp) ──
-  {
-    id: "altitude",
-    label: "Altitude",
-    value: 7_162,
-    unit: "m",
-    icon: "⛰️",
-    accentColor: "#6EE7B7",
-    trend: [7155, 7157, 7156, 7158, 7159, 7160, 7162],
-    section: "environment",
     modes: ["daily", "extreme"],
-  },
-  {
-    id: "air-pressure",
-    label: "Pressure",
-    value: 376,
-    unit: "hPa",
-    icon: "📊",
-    accentColor: "#93C5FD",
-    trend: [377, 376, 377, 376, 376, 377, 376],
-    section: "environment",
-    modes: ["extreme"],
-    subtitle: "37% sea lvl",
-  },
-  {
-    id: "ambient-temp",
-    label: "Ambient",
-    value: -22,
-    unit: "°C",
-    icon: "❄️",
-    accentColor: "#5AC8CA",
-    trend: [-21, -22, -21, -22, -23, -22, -22],
-    section: "environment",
-    modes: ["daily", "extreme"],
-    range: { min: -50, max: 10, warningLow: -25, criticalLow: -35 },
-  },
-
-  // ── Motion (IMU / accelerometer) ──
-  {
-    id: "cadence",
-    label: "Cadence",
-    value: 42,
-    unit: "spm",
-    icon: "🦶",
-    accentColor: "#818CF8",
-    trend: [44, 43, 40, 43, 41, 44, 42],
-    section: "motion",
-    modes: ["extreme"],
-  },
-  {
-    id: "ascent-rate",
-    label: "Ascent Rate",
-    value: 84,
-    unit: "m/hr",
-    icon: "📈",
-    accentColor: "#6EE7B7",
-    trend: [92, 90, 88, 87, 86, 85, 84],
-    section: "motion",
-    modes: ["daily", "extreme"],
-    subtitle: "Slowing",
+    range: { min: 0, max: 100, warningHigh: 80, criticalHigh: 95 },
   },
 ];
 

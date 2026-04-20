@@ -24,20 +24,13 @@ type SimConfig = {
 const SIM_TICK_MS = 1_000;
 
 const simConfigs: Record<string, SimConfig> = {
-  // Vitals — frequent, HR reactive at altitude
+  // Vitals
   "heart-rate":   { volatility: 5,    interval: 1,  integer: true,  decimals: 0, drift: 0 },
   "blood-oxygen": { volatility: 1,    interval: 1,  integer: true,  decimals: 0, drift: 0 },
   "hrv":          { volatility: 2,    interval: 1,  integer: true,  decimals: 0, drift: 0 },
-  // Body — slower but still visible
+  // Body
   "core-temp":    { volatility: 0.08, interval: 3,  integer: false, decimals: 1, drift: 0 },
-  "skin-temp":    { volatility: 0.2,  interval: 3,  integer: false, decimals: 1, drift: 0 },
-  // Environment
-  "altitude":     { volatility: 2,    interval: 2,  integer: true,  decimals: 0, drift: 0.4 },
-  "air-pressure": { volatility: 0.3,  interval: 4,  integer: true,  decimals: 0, drift: 0 },
-  "ambient-temp": { volatility: 0.3,  interval: 4,  integer: true,  decimals: 0, drift: 0 },
-  // Motion
-  "cadence":      { volatility: 3,    interval: 1,  integer: true,  decimals: 0, drift: 0 },
-  "ascent-rate":  { volatility: 4,    interval: 2,  integer: true,  decimals: 0, drift: 0 },
+  "sweat":        { volatility: 2,    interval: 2,  integer: true,  decimals: 0, drift: 0 },
 };
 
 // ── Helpers ──
@@ -50,7 +43,7 @@ function getSubtitle(
   id: string,
   value: number,
   status: MetricStatus,
-  trend: number[],
+  _trend: number[],
 ): string | undefined {
   switch (id) {
     case "blood-oxygen":
@@ -71,22 +64,11 @@ function getSubtitle(
         : status === "warning"
           ? "Watch"
           : "Normal";
-    case "air-pressure":
-      return `${Math.round((value / 1013.25) * 100)}% sea lvl`;
-    case "ascent-rate": {
-      if (trend.length < 4) return undefined;
-      const recent = trend.slice(-3);
-      const earlier = trend.slice(-6, -3);
-      if (earlier.length === 0) return undefined;
-      const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
-      const prevAvg = earlier.reduce((a, b) => a + b, 0) / earlier.length;
-      if (value < 0) return "Descending";
-      return avg < prevAvg - 3
-        ? "Slowing"
-        : avg > prevAvg + 3
-          ? "Accelerating"
-          : "Steady";
-    }
+    case "sweat":
+      if (value >= 80) return "Drenched";
+      if (value >= 55) return "Sweating";
+      if (value >= 25) return "Moist";
+      return "Dry";
     default:
       return undefined;
   }
@@ -94,7 +76,7 @@ function getSubtitle(
 
 // ── Dynamic alert generation ──
 
-function generateAlerts(
+export function generateAlerts(
   metricsById: Record<string, Metric>,
 ): { extreme: Alert[]; daily: Alert[] } {
   const extreme: Alert[] = [];
@@ -192,29 +174,6 @@ function generateAlerts(
       message: "Core temp dropping \u2014 add layers",
       channels: ["thermal"],
       timestamp: "3m",
-      mode: "extreme",
-    });
-  }
-
-  const at = metricsById["ambient-temp"];
-  if (at?.status === "critical") {
-    extreme.push({
-      id: "e6",
-      code: "E6",
-      severity: "critical",
-      message: "Lethal cold \u2014 seek shelter",
-      channels: ["haptic", "audio", "thermal"],
-      timestamp: "now",
-      mode: "extreme",
-    });
-  } else if (at?.status === "warning") {
-    extreme.push({
-      id: "e7",
-      code: "E7",
-      severity: "warning",
-      message: "Extreme cold \u2014 limit exposure",
-      channels: ["thermal", "haptic"],
-      timestamp: "5m",
       mode: "extreme",
     });
   }
@@ -427,15 +386,6 @@ export function useSimulatedData(scenario?: ScenarioPreset) {
       });
 
       setMetrics(newMetrics);
-
-      // Sync expedition altitude
-      const alt = s.values["altitude"];
-      if (alt !== undefined) {
-        setExpedition((prev) => {
-          if (prev.currentAltitude === alt) return prev;
-          return { ...prev, currentAltitude: alt };
-        });
-      }
 
       // Regenerate alerts from current statuses
       const byId = Object.fromEntries(newMetrics.map((nm) => [nm.id, nm]));

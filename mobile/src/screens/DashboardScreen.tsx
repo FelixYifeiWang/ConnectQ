@@ -37,11 +37,9 @@ function buildSections(mode: AppMode, allMetrics: Metric[]): SectionDef[] {
   const groups: Record<string, { title: string; items: Metric[] }> = {};
   const titles: Record<string, string> = {
     vitals: "Vitals",
-    body: "Temp",
-    environment: "Environment",
-    motion: "Motion",
+    body: "Body",
   };
-  const order = ["vitals", "body", "environment", "motion"];
+  const order = ["vitals", "body"];
   for (const m of filtered) {
     if (!groups[m.section]) groups[m.section] = { title: titles[m.section], items: [] };
     groups[m.section].items.push(m);
@@ -281,7 +279,7 @@ export default function DashboardScreen() {
       {/* Content */}
       <Animated.View style={{ opacity: contentOpacity }}>
         {currentPreset.bodyMap && <BodyMap metrics={metrics} />}
-        {mode === "extreme" && !isLive && <ExpeditionHero expedition={expedition} delay={80} />}
+        {mode === "extreme" && <ExpeditionHero expedition={expedition} delay={80} />}
 
         {alerts.map((a, i) => <AlertCard key={a.id} alert={a} delay={d + i * 40} />)}
 

@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  type Alert,
   type ExpeditionInfo,
   type Metric,
   expedition as baseExpedition,
@@ -8,6 +7,7 @@ import {
   metrics as initialMetrics,
 } from "../data/mockData";
 import { fetchSensorReport, type SensorReport } from "../api/sensorApi";
+import { generateAlerts } from "./useSimulatedData";
 
 export type LiveConnection = "disconnected" | "connecting" | "connected" | "error";
 
@@ -24,27 +24,32 @@ function blankMetrics(): Metric[] {
   }));
 }
 
+function liveValueFor(id: string, report: SensorReport): number | null {
+  if (id === "core-temp") return Number(report.thermistorC.toFixed(1));
+  if (id === "sweat") return Math.round(report.moisturePct);
+  return null;
+}
+
 function applyReport(
   base: Metric[],
   report: SensorReport,
   history: Record<string, number[]>,
 ): Metric[] {
   return base.map((m) => {
-    if (m.id === "core-temp") {
-      const v = Number(report.thermistorC.toFixed(1));
-      const trend = history[m.id] ?? [];
-      trend.push(v);
-      while (trend.length > TREND_WINDOW) trend.shift();
-      history[m.id] = trend;
-      return {
-        ...m,
-        value: v,
-        trend: [...trend],
-        status: getStatus(v, m.range),
-        placeholder: false,
-      };
-    }
-    return m;
+    const v = liveValueFor(m.id, report);
+    if (v === null) return m;
+
+    const trend = history[m.id] ?? [];
+    trend.push(v);
+    while (trend.length > TREND_WINDOW) trend.shift();
+    history[m.id] = trend;
+    return {
+      ...m,
+      value: v,
+      trend: [...trend],
+      status: getStatus(v, m.range),
+      placeholder: false,
+    };
   });
 }
 
@@ -80,11 +85,16 @@ export function useLiveData(host: string | null) {
     };
   }, [host]);
 
+  const alerts = useMemo(() => {
+    const byId = Object.fromEntries(metrics.map((m) => [m.id, m]));
+    return generateAlerts(byId);
+  }, [metrics]);
+
   return {
     metrics,
     expedition: baseExpedition as ExpeditionInfo,
-    extremeAlerts: [] as Alert[],
-    dailyAlerts: [] as Alert[],
+    extremeAlerts: alerts.extreme,
+    dailyAlerts: alerts.daily,
     connection,
   };
 }
