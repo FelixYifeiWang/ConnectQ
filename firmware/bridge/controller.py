@@ -5,6 +5,7 @@ over USB serial or a WiFi TCP connection. Keys 1-5 activate the five PWM
 outputs (haptics + ventilation) at 2000us; R resets all five to 1500us.
 
 Usage:
+    python controller.py                                # uses .board.conf defaults
     python controller.py --serial /dev/tty.usbmodem1101
     python controller.py --wifi 192.168.1.42:4040
 

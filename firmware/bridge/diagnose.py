@@ -6,6 +6,7 @@ verifies the parsed values are plausible, and pings each activation key
 Prints a PASS/FAIL line per check and exits non-zero on any failure.
 
 Usage:
+    python diagnose.py                                # uses .board.conf defaults
     python diagnose.py --serial /dev/tty.usbmodem1101
     python diagnose.py --wifi 192.168.1.42:4040
 """
@@ -20,7 +21,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from transport import Transport, add_transport_args, build_transport  # pyright: ignore[reportMissingImports]
+from transport import Transport, add_transport_args, build_transport, resolve_args  # pyright: ignore[reportMissingImports]
 
 
 REPORT_START = "====== SENSOR REPORT ======"
@@ -287,6 +288,7 @@ def main() -> int:
     add_transport_args(parser)
     parser.add_argument("--timeout", type=float, default=5.0, help="Seconds to wait for first sensor report (default 5)")
     args = parser.parse_args()
+    resolve_args(args)
 
     target = f"serial {args.serial}" if args.serial else f"wifi {args.wifi}"
     print(f"Connecting to board ({target})...")

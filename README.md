@@ -83,8 +83,14 @@ Board-backed metrics today: **thermistor → Temperature** and **moisture → Sw
 ```
 SIXTH/
 ├── firmware/
-│   └── sketch/sketch.ino          # ESP32 sketch: sensors + PWM outputs + WiFi/Serial I/O
-│   └── bridge/controller.py       # Laptop keystroke forwarder
+│   ├── sketch/sketch.ino          # ESP32 sketch: sensors + PWM outputs + WiFi/Serial I/O
+│   └── bridge/
+│       ├── controller.py          # Laptop keystroke forwarder (live hardware)
+│       ├── diagnose.py            # End-to-end smoke test against a connected board
+│       ├── test_diagnose_parsers.py  # Unit tests for diagnose.py's parsers (no hardware)
+│       ├── test_transport.py      # Unit tests for transport.py's .board.conf loader
+│       ├── transport.py           # Shared serial/WiFi transports
+│       └── setup_board.py         # Detect port/IP/FQBN → write .board.conf
 ├── mobile/                        # Expo app (standalone simulator)
 │   ├── App.tsx
 │   └── src/
@@ -164,7 +170,7 @@ Every script accepts explicit flags if you need to deviate from `.board.conf`:
 - `./dev.sh --serial [/dev/...]` or `./dev.sh --wifi [<ip>:4040]`
 - `python3 firmware/bridge/controller.py --serial ...` / `--wifi ...`
 - `python3 firmware/bridge/diagnose.py --serial ...` / `--wifi ...`
-- `python3 firmware/bridge/test_diagnose.py` — hardware-free unit tests for the parser
+- `python3 -m unittest discover firmware/bridge` — hardware-free unit tests (parser + .board.conf loader)
 
 Prefer the Arduino IDE? Open `firmware/sketch/sketch.ino` and click Upload.
 

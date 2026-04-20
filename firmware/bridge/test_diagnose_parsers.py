@@ -1,4 +1,10 @@
-"""Unit tests for diagnose.py pure-Python helpers (no hardware needed)."""
+"""Unit tests for diagnose.py's pure-Python parser helpers.
+
+Covers parse_report, plausibility_errors, match_activation_ack, and
+match_reset_ack. No hardware or transport needed — runs without an
+ESP32 attached. The hardware-facing end-to-end smoke test lives in
+diagnose.py itself.
+"""
 
 from __future__ import annotations
 
