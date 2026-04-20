@@ -68,6 +68,6 @@ echo "Compiling $SKETCH_DIR for $FQBN..."
 arduino-cli compile --fqbn "$FQBN" "$SKETCH_DIR"
 
 echo "Uploading to $PORT..."
-arduino-cli upload --fqbn "$FQBN" -p "$PORT" "$SKETCH_DIR"
+arduino-cli upload --fqbn "$FQBN" -p "$PORT" --upload-property "upload.speed=115200" "$SKETCH_DIR"
 
 echo "Done. Open a serial monitor at 115200 baud (e.g. 'screen $PORT 115200') to see output."
