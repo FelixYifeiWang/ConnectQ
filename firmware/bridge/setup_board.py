@@ -88,20 +88,35 @@ def detect_wifi_target(port: str, timeout_s: float) -> Optional[str]:
         )
         return None
 
+    # Hard-reset the ESP32 so we can capture the boot log (WiFi scan + connect).
+    # Pulsing RTS drives EN low through the Feather's auto-reset circuit.
+    try:
+        ser.dtr = False
+        ser.rts = True
+        time.sleep(0.1)
+        ser.rts = False
+        time.sleep(0.05)
+        ser.reset_input_buffer()
+    except Exception:
+        pass  # Not all USB-UART bridges expose DTR/RTS — fall through.
+
     buf = b""
     deadline = time.monotonic() + timeout_s
     try:
         while time.monotonic() < deadline:
             chunk = ser.read(256)
-            if chunk:
-                buf += chunk
-                text = buf.decode("utf-8", errors="replace")
-                for line in text.splitlines():
-                    m = _WIFI_LINE_RE.search(line)
-                    if m:
-                        return f"{m.group(1)}:{m.group(2)}"
-            else:
+            if not chunk:
                 time.sleep(0.1)
+                continue
+            buf += chunk
+            # Process complete lines only; keep the trailing partial for next read.
+            while b"\n" in buf:
+                line_bytes, buf = buf.split(b"\n", 1)
+                line = line_bytes.decode("utf-8", errors="replace").rstrip("\r")
+                print(f"    > {line}")
+                m = _WIFI_LINE_RE.search(line)
+                if m:
+                    return f"{m.group(1)}:{m.group(2)}"
     finally:
         ser.close()
     return None
@@ -125,8 +140,8 @@ def main() -> int:
     parser.add_argument(
         "--wifi-timeout",
         type=float,
-        default=15.0,
-        help="Seconds to wait for the sketch to announce its IP (default 15)",
+        default=25.0,
+        help="Seconds to wait for the sketch to announce its IP (default 25)",
     )
     parser.add_argument(
         "--skip-wifi",

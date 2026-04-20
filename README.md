@@ -123,6 +123,26 @@ Copy `firmware/sketch/secrets.h.example` to `firmware/sketch/secrets.h` and fill
 
 Copy `mobile/.env.example` to `mobile/.env` and set `EXPO_PUBLIC_BOARD_HOST` to the board's IP (either `WIFI_TARGET` from `.board.conf` after running `setup_board.py`, or the line the sketch prints on boot: `Mobile LIVE page: http://<ip>/report`). Without this, the LIVE page stays on `OFFLINE`. `mobile/.env` is gitignored.
 
+### macOS + iPhone Personal Hotspot: disable IPv6 on Wi-Fi
+
+**Required if you're developing on a Mac connected to an iPhone's Personal Hotspot.** On IPv6-only carriers (e.g., Verizon, T-Mobile), macOS joins the hotspot in NAT64 / CLAT mode and assigns itself a stub `192.0.0.2/32` IPv4. The ESP32, on the same hotspot, gets a normal `172.20.10.x` — but the Mac has no IPv4 route to reach it, so `controller.py --wifi` and Metro both fail (`TimeoutError` / "internet connection appears to be offline").
+
+Force the Mac to request IPv4 from the hotspot:
+
+```bash
+networksetup -setv6off Wi-Fi
+```
+
+Then reconnect to the hotspot. `ifconfig en0 | grep 'inet '` should now show `172.20.10.x`, and `ping 172.20.10.2` should succeed.
+
+To revert when you're back on a normal network:
+
+```bash
+networksetup -setv6automatic Wi-Fi
+```
+
+Skip this step if your Mac and the ESP32 are on the same regular router (home/office Wi-Fi) — that case already works out of the box.
+
 ### Daily use
 
 With the board plugged in:

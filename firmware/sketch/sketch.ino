@@ -211,9 +211,45 @@ void handleHttpNotFound() {
 }
 
 // ===================== WiFi =====================
+// Scans for visible networks and prints them. Useful for diagnosing why the
+// configured SSID isn't connecting — if it doesn't appear here, the ESP32
+// can't see it (out of range, 5 GHz-only, hidden, etc.).
+void scanAndPrintNetworks() {
+  Serial.println("Scanning WiFi networks...");
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect(false, true);
+  delay(100);
+
+  int n = WiFi.scanNetworks();
+  if (n <= 0) {
+    Serial.println("  (no networks found)");
+    return;
+  }
+
+  Serial.print("Found ");
+  Serial.print(n);
+  Serial.println(" network(s):");
+  for (int i = 0; i < n; i++) {
+    Serial.print("  ");
+    Serial.print(i + 1);
+    Serial.print(". \"");
+    Serial.print(WiFi.SSID(i));
+    Serial.print("\"  ");
+    Serial.print(WiFi.RSSI(i));
+    Serial.print(" dBm  ch");
+    Serial.print(WiFi.channel(i));
+    Serial.print("  ");
+    Serial.println(WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "open" : "secured");
+  }
+  WiFi.scanDelete();
+}
+
 void beginWiFi() {
-  Serial.print("Connecting to WiFi SSID: ");
-  Serial.println(WIFI_SSID);
+  scanAndPrintNetworks();
+
+  Serial.print("Connecting to WiFi SSID: \"");
+  Serial.print(WIFI_SSID);
+  Serial.println("\"");
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
