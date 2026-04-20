@@ -55,11 +55,17 @@ function Sparkline({
   entranceDelay: number;
   sparkRange?: [number, number];
 }) {
-  if (data.length === 0) return null;
-
-  const count = data.length;
-  const barHeights = useRef(data.map(() => new Animated.Value(0))).current;
-  const barOpacities = useRef(data.map(() => new Animated.Value(0))).current;
+  // Grow the per-bar Animated.Value arrays to match incoming data. LIVE mode
+  // starts with trend=[] and pushes up to TREND_WINDOW, so a mount-time useRef
+  // snapshot would leave barHeights[i] undefined for later bars.
+  const barHeightsRef = useRef<Animated.Value[]>([]);
+  const barOpacitiesRef = useRef<Animated.Value[]>([]);
+  while (barHeightsRef.current.length < data.length) {
+    barHeightsRef.current.push(new Animated.Value(0));
+    barOpacitiesRef.current.push(new Animated.Value(0));
+  }
+  const barHeights = barHeightsRef.current;
+  const barOpacities = barOpacitiesRef.current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const entranceDone = useRef(false);
 
@@ -148,9 +154,11 @@ function Sparkline({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
+  if (data.length === 0) return null;
+
   return (
     <Animated.View style={[sparkStyles.container, { opacity: pulseAnim }]}>
-      {Array.from({ length: count }, (_, i) => (
+      {Array.from({ length: data.length }, (_, i) => (
         <Animated.View
           key={i}
           style={[sparkStyles.bar, {
