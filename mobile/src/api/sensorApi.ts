@@ -6,11 +6,14 @@
 export type SensorReport = {
   thermistorC: number;
   moisturePct: number;
+  heartRateBpm: number | null;
   receivedAt: number;
 };
 
 const TEMP_C_RE = /Temp:\s*([-\d.]+)\s*°C/;
 const MOIST_RE = /Moisture:\s*([-\d.]+)\s*%/;
+// "Avg BPM: 71" — prefer the smoothed average over the instantaneous BPM.
+const AVG_BPM_RE = /Avg BPM:\s*(\d+)/;
 const FETCH_TIMEOUT_MS = 2500;
 
 export function parseSensorReport(text: string): SensorReport | null {
@@ -22,7 +25,16 @@ export function parseSensorReport(text: string): SensorReport | null {
   const moisturePct = Number.parseFloat(moistMatch[1]);
   if (!Number.isFinite(thermistorC) || !Number.isFinite(moisturePct)) return null;
 
-  return { thermistorC, moisturePct, receivedAt: Date.now() };
+  // Heart rate is optional — absent section, "Status: no sensor", or
+  // zero (no finger) all surface as null so the UI keeps its placeholder.
+  let heartRateBpm: number | null = null;
+  const avgBpmMatch = AVG_BPM_RE.exec(text);
+  if (avgBpmMatch) {
+    const bpm = Number.parseInt(avgBpmMatch[1], 10);
+    if (Number.isFinite(bpm) && bpm > 0) heartRateBpm = bpm;
+  }
+
+  return { thermistorC, moisturePct, heartRateBpm, receivedAt: Date.now() };
 }
 
 export async function fetchSensorReport(host: string | null): Promise<SensorReport | null> {

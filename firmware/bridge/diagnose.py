@@ -28,12 +28,17 @@ REPORT_START = "====== SENSOR REPORT ======"
 REPORT_END = "------------------------"
 THERM_HEADER = "------ Thermistor ------"
 MOIST_HEADER = "------ Moisture ------"
+HR_HEADER = "------ Heart Rate ------"
 
 _ADC_RAW_RE = re.compile(r"ADC raw:\s*(\d+)")
 _TEMP_RE = re.compile(r"Temp:\s*([-+]?\d+(?:\.\d+)?)\s*°?C")
 _MOIST_RE = re.compile(r"Moisture:\s*([-+]?\d+(?:\.\d+)?)\s*%")
+_BPM_RE = re.compile(r"BPM:\s*([-+]?\d+(?:\.\d+)?)")
+_AVG_BPM_RE = re.compile(r"Avg BPM:\s*(\d+)")
 _ACK_ACT_RE = re.compile(r"ACT\s+(\S+)\s+(\d+)us")
 _ACK_RESET_RE = re.compile(r"RESET\s+all\s+(\d+)us")
+_ACK_BUZZ_RE = re.compile(r"BUZZ\s+pattern=(\w+)")
+_ACK_HEAT_RE = re.compile(r"HEAT\s+on\s+auto_off=(\d+)ms")
 
 KEY_TO_NAME = {
     "1": "right_top_haptic",
@@ -50,6 +55,8 @@ class ReportValues:
     temp_c: float
     moist_raw: int
     moist_pct: float
+    heart_bpm: Optional[float] = None
+    heart_avg: Optional[int] = None
 
 
 # ---- Pure parsers (unit-testable without hardware) ----
@@ -63,15 +70,21 @@ def parse_report(block: str) -> Optional[ReportValues]:
     temp_c: Optional[float] = None
     moist_raw: Optional[int] = None
     moist_pct: Optional[float] = None
+    heart_bpm: Optional[float] = None
+    heart_avg: Optional[int] = None
 
     in_therm = False
     in_moist = False
+    in_hr = False
     for line in block.splitlines():
         if THERM_HEADER in line:
-            in_therm, in_moist = True, False
+            in_therm, in_moist, in_hr = True, False, False
             continue
         if MOIST_HEADER in line:
-            in_therm, in_moist = False, True
+            in_therm, in_moist, in_hr = False, True, False
+            continue
+        if HR_HEADER in line:
+            in_therm, in_moist, in_hr = False, False, True
             continue
         adc = _ADC_RAW_RE.search(line)
         if adc:
@@ -87,6 +100,16 @@ def parse_report(block: str) -> Optional[ReportValues]:
         moist = _MOIST_RE.search(line)
         if moist:
             moist_pct = float(moist.group(1))
+            continue
+        if in_hr:
+            # Avg BPM must be matched before BPM (substring overlap).
+            avg = _AVG_BPM_RE.search(line)
+            if avg:
+                heart_avg = int(avg.group(1))
+                continue
+            bpm = _BPM_RE.search(line)
+            if bpm:
+                heart_bpm = float(bpm.group(1))
 
     if therm_raw is None or temp_c is None or moist_raw is None or moist_pct is None:
         return None
@@ -95,6 +118,8 @@ def parse_report(block: str) -> Optional[ReportValues]:
         temp_c=temp_c,
         moist_raw=moist_raw,
         moist_pct=moist_pct,
+        heart_bpm=heart_bpm,
+        heart_avg=heart_avg,
     )
 
 
@@ -113,6 +138,11 @@ def plausibility_errors(r: ReportValues) -> list[str]:
         errs.append(f"moisture non-finite: {r.moist_pct}")
     elif not (0.0 <= r.moist_pct <= 100.0):
         errs.append(f"moisture percent out of range: {r.moist_pct:.1f}% (expected 0..100)")
+    if r.heart_bpm is not None:
+        if not math.isfinite(r.heart_bpm):
+            errs.append(f"heart rate non-finite: {r.heart_bpm}")
+        elif not (40.0 <= r.heart_bpm <= 200.0):
+            errs.append(f"heart rate out of plausible range: {r.heart_bpm:.1f} BPM (expected 40..200)")
     return errs
 
 
@@ -123,6 +153,16 @@ def match_activation_ack(line: str) -> Optional[tuple[str, int]]:
 
 def match_reset_ack(line: str) -> Optional[int]:
     m = _ACK_RESET_RE.search(line)
+    return int(m.group(1)) if m else None
+
+
+def match_buzz_ack(line: str) -> Optional[str]:
+    m = _ACK_BUZZ_RE.search(line)
+    return m.group(1) if m else None
+
+
+def match_heat_ack(line: str) -> Optional[int]:
+    m = _ACK_HEAT_RE.search(line)
     return int(m.group(1)) if m else None
 
 
@@ -198,6 +238,14 @@ def _is_reset_ack(line: str) -> bool:
     return match_reset_ack(line) is not None
 
 
+def _is_buzz_ack(line: str) -> bool:
+    return match_buzz_ack(line) is not None
+
+
+def _is_heat_ack(line: str) -> bool:
+    return match_heat_ack(line) is not None
+
+
 def run_diagnostics(transport: Transport, timeout_s: float) -> list[CheckResult]:
     results: list[CheckResult] = []
     reader = LineReader(transport)
@@ -253,6 +301,20 @@ def run_diagnostics(transport: Transport, timeout_s: float) -> list[CheckResult]
                 True,
                 matched.strip(),
             ))
+
+    transport.send(b"6")
+    matched = wait_for_line(reader, _is_buzz_ack, timeout_s=1.5)
+    if matched is None:
+        results.append(CheckResult("Buzzer key '6'", False, "no BUZZ ack within 1.5s"))
+    else:
+        results.append(CheckResult("Buzzer key '6'", True, matched.strip()))
+
+    transport.send(b"7")
+    matched = wait_for_line(reader, _is_heat_ack, timeout_s=1.5)
+    if matched is None:
+        results.append(CheckResult("Heater key '7'", False, "no HEAT ack within 1.5s"))
+    else:
+        results.append(CheckResult("Heater key '7'", True, matched.strip()))
 
     transport.send(b"R")
     matched = wait_for_line(reader, _is_reset_ack, timeout_s=1.5)

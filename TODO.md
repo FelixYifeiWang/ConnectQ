@@ -7,4 +7,4 @@
 
 ## Mobile
 
-- [ ] Wire sensors for the remaining LIVE metrics. Thermistor → Temperature and moisture → Sweat are live; Heart Rate, SpO₂, and HRV still render `—` until pulse-ox / ECG hardware is added.
+- [ ] Wire sensors for the remaining LIVE metrics. Thermistor → Temperature, moisture → Sweat, and MAX30102 → Heart Rate are live; SpO₂ and HRV still render `—` until the Red/IR ratio math and RR-interval buffer are added.
