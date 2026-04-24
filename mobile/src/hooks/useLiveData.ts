@@ -27,6 +27,7 @@ function blankMetrics(): Metric[] {
 function liveValueFor(id: string, report: SensorReport): number | null {
   if (id === "core-temp") return Number(report.thermistorC.toFixed(1));
   if (id === "sweat") return Math.round(report.moisturePct);
+  if (id === "heart-rate") return report.heartRateBpm;
   return null;
 }
 

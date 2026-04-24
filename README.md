@@ -31,7 +31,10 @@ Single ESP32 sketch. On boot it:
 
 - Initializes a motor on **GPIO 21** (toggles 1 s on / 1 s off — existing test pattern).
 - Reads a thermistor on **GPIO 34 / A2** and a resistive moisture sensor on **GPIO 39 / A3** (12-bit ADC, 11 dB attenuation, 16-sample average).
+- Reads a **MAX30102** pulse-ox on the Feather default I²C pins (**SDA / SCL**, 3V3, GND). Absent sensor is detected at boot — the rest of the firmware runs unchanged and the report emits `Status: no sensor`. The MAX30105 SparkFun library is auto-installed by `flash.sh`.
 - Attaches five servo-style PWM outputs (50 Hz, 16-bit) on **GPIO 12 / 13 / 27 / 32 / 33**, parked at 1500 µs.
+- Attaches a piezo buzzer on **A0 / GPIO 26** driven by LEDC tone generation — plays a non-blocking three-tone alert pattern on command `6`, silenced by `R`.
+- Drives a heating element on **GPIO 15** via a MOSFET gate — digital on/off on command `7`, with a 30 s auto-off safety timeout. `R` cuts it immediately.
 - Connects to WiFi if credentials are filled in (`WIFI_SSID`, `WIFI_PASS`). Falls back to serial-only if WiFi is unreachable.
 - Starts a TCP server on port **4040** for one WiFi client at a time.
 
@@ -44,7 +47,9 @@ Every second it prints a sensor report to both the USB serial monitor and the co
 | `3`   | activate **left bottom haptic**  (GPIO 27, 2000 µs) |
 | `4`   | activate **ventilation**         (GPIO 32, 2000 µs) |
 | `5`   | activate **left top haptic**     (GPIO 33, 2000 µs) |
-| `R`/`r` | reset all five outputs to 1500 µs              |
+| `6`   | play **buzzer alert pattern**    (A0 / GPIO 26, 1k–2k Hz sweep, ~1.1 s) |
+| `7`   | activate **heater**              (GPIO 15, ON, auto-off after 30 s) |
+| `R`/`r` | reset all haptics + silence buzzer + heater off |
 
 ## Laptop controller (`firmware/bridge/controller.py`)
 
@@ -76,7 +81,7 @@ Features:
 2. `cp mobile/.env.example mobile/.env` and set `EXPO_PUBLIC_BOARD_HOST` to that IP (or `<ip>:<port>`). `mobile/.env` is gitignored.
 3. `cd mobile && npm run start`. The LIVE page polls `GET /report` every second, parses the plain-text format, and updates metric cards. Fails fast (2.5 s timeout) when the board isn't reachable, dropping the chip back to `OFFLINE`.
 
-Board-backed metrics today: **thermistor → Temperature** and **moisture → Sweat**. Heart Rate / SpO₂ / HRV render `—` until those sensors are added. To bind a new metric, extend `liveValueFor` in `mobile/src/hooks/useLiveData.ts`.
+Board-backed metrics today: **thermistor → Temperature**, **moisture → Sweat**, and **MAX30102 → Heart Rate** (Avg BPM; zero when no finger on sensor). SpO₂ / HRV render `—` until ratio-of-ratios and RR-interval math are added. To bind a new metric, extend `liveValueFor` in `mobile/src/hooks/useLiveData.ts`.
 
 ## Project structure
 
@@ -173,6 +178,28 @@ Every script accepts explicit flags if you need to deviate from `.board.conf`:
 - `python3 -m unittest discover firmware/bridge` — hardware-free unit tests (parser + .board.conf loader)
 
 Prefer the Arduino IDE? Open `firmware/sketch/sketch.ino` and click Upload.
+
+## Calibrating sensors
+
+Each sensor has a 1-point offset stored in the ESP32's NVS flash (`sixth_cal` namespace). The offset is added to the reported value before it enters `/report` — so once calibrated, both the laptop and the mobile app see corrected numbers. **No reflashing needed after the initial firmware flash.** Offsets persist across reboots and power cycles.
+
+```bash
+python3 firmware/bridge/calibrate_temp.py        # thermistor — need a reference thermometer
+python3 firmware/bridge/calibrate_moisture.py    # moisture — dry (0%) or soaked (100%) is easiest
+python3 firmware/bridge/calibrate_heart.py       # MAX30102 — use a chest strap / pulse-ox as reference
+```
+
+Each script reads the current value, asks for your reference measurement, computes `offset = reference - reported`, sends it to the board (`CT`/`CM`/`CH <value>`), and verifies the next report matches. Takes about 15 seconds.
+
+Low-level commands (also work from a raw serial terminal):
+
+| Command | Effect |
+| ------- | ------ |
+| `CT <°C>` | set temperature offset |
+| `CM <%>` | set moisture offset |
+| `CH <BPM>` | set heart-rate offset |
+| `CG` | print current offsets |
+| `CC` | clear all three to zero |
 
 ## Known gaps
 

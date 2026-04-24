@@ -64,6 +64,13 @@ fi
 
 SKETCH_DIR="$REPO_ROOT/firmware/sketch"
 
+# Ensure the MAX30102 library is installed. Idempotent — a second run is a no-op.
+HR_LIB='SparkFun MAX3010x Pulse and Proximity Sensor Library'
+if ! arduino-cli lib list 2>/dev/null | grep -q "MAX3010x"; then
+  echo "Installing Arduino library: $HR_LIB"
+  arduino-cli lib install "$HR_LIB"
+fi
+
 echo "Compiling $SKETCH_DIR for $FQBN..."
 arduino-cli compile --fqbn "$FQBN" "$SKETCH_DIR"
 
