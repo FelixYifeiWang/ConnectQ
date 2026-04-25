@@ -29,6 +29,11 @@ from transport import Transport  # pyright: ignore[reportMissingImports]
 
 _CAL_ACK_SET_RE = re.compile(r"CAL\s+ok\s+(\w+_off)=([-+]?\d+(?:\.\d+)?)")
 _CAL_ACK_CLEAR_RE = re.compile(r"CAL\s+ok\s+cleared")
+_CAL_GET_RE = re.compile(
+    r"CAL\s+temp_off=([-+]?\d+(?:\.\d+)?)\s+"
+    r"moist_off=([-+]?\d+(?:\.\d+)?)\s+"
+    r"heart_off=([-+]?\d+(?:\.\d+)?)"
+)
 
 SENSOR_KEYS = {"T", "M", "H"}
 
@@ -61,6 +66,20 @@ def parse_cal_ack(line: str) -> Optional[tuple[str, Optional[float]]]:
     if _CAL_ACK_CLEAR_RE.search(line):
         return ("cleared", None)
     return None
+
+
+def parse_cal_get(line: str) -> Optional[dict[str, float]]:
+    """Parse the firmware's `CG` reply, e.g. 'CAL temp_off=-1.80 moist_off=0.00 heart_off=2.50'."""
+    if not line:
+        return None
+    m = _CAL_GET_RE.search(line)
+    if not m:
+        return None
+    return {
+        "temp_off": float(m.group(1)),
+        "moist_off": float(m.group(2)),
+        "heart_off": float(m.group(3)),
+    }
 
 
 # ---- Interactive flow ----
@@ -115,8 +134,25 @@ def run_calibration(transport: Transport, spec: SensorSpec, timeout_s: float = 5
         print(f"FAIL not a number: {raw!r}")
         return 1
 
-    offset = compute_offset(reported=current, reference=reference)
-    print(f"Applying offset {offset:+.2f} {spec.unit}...")
+    # The firmware's `CT/CM/CH` commands SET the stored offset (absolute),
+    # but `current` already includes any existing offset. Query it via `CG`
+    # so we send the correct absolute value rather than overwriting prior
+    # calibration with what's actually a relative delta.
+    transport.send(b"CG\n")
+    get_line = wait_for_line(reader, lambda l: parse_cal_get(l) is not None, timeout_s=2.0)
+    if get_line is None:
+        print("FAIL no CAL response from CG within 2s")
+        return 1
+    existing_offsets = parse_cal_get(get_line)
+    assert existing_offsets is not None  # wait_for_line only returns on match
+    existing = existing_offsets[spec.ack_field]
+
+    delta = compute_offset(reported=current, reference=reference)
+    offset = delta + existing
+    print(
+        f"Applying offset {offset:+.2f} {spec.unit} "
+        f"(stored {existing:+.2f} + delta {delta:+.2f})..."
+    )
     transport.send(format_set_command(spec.key, offset).encode("ascii"))
 
     ack_line = wait_for_line(

@@ -13,6 +13,7 @@ from calibrate import (  # pyright: ignore[reportMissingImports]
     compute_offset,
     format_set_command,
     parse_cal_ack,
+    parse_cal_get,
 )
 
 
@@ -60,6 +61,32 @@ class ParseCalAckTests(unittest.TestCase):
 
     def test_none_on_empty(self):
         self.assertIsNone(parse_cal_ack(""))
+
+
+class ParseCalGetTests(unittest.TestCase):
+    def test_all_zero(self):
+        self.assertEqual(
+            parse_cal_get("CAL temp_off=0.00 moist_off=0.00 heart_off=0.00"),
+            {"temp_off": 0.0, "moist_off": 0.0, "heart_off": 0.0},
+        )
+
+    def test_mixed_signs(self):
+        self.assertEqual(
+            parse_cal_get("CAL temp_off=-52.97 moist_off=2.50 heart_off=-7.00"),
+            {"temp_off": -52.97, "moist_off": 2.5, "heart_off": -7.0},
+        )
+
+    def test_explicit_plus_sign(self):
+        self.assertEqual(
+            parse_cal_get("CAL temp_off=+1.32 moist_off=+0.00 heart_off=+0.00"),
+            {"temp_off": 1.32, "moist_off": 0.0, "heart_off": 0.0},
+        )
+
+    def test_none_on_ack_line(self):
+        self.assertIsNone(parse_cal_get("CAL ok temp_off=-1.80"))
+
+    def test_none_on_empty(self):
+        self.assertIsNone(parse_cal_get(""))
 
 
 if __name__ == "__main__":

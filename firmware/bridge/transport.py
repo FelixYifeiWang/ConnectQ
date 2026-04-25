@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import argparse
 import socket
+import sys
 from pathlib import Path
-from typing import Protocol
+from typing import Optional, Protocol
 
 
 class Transport(Protocol):
@@ -126,9 +127,54 @@ def resolve_args(args: argparse.Namespace) -> None:
     resolve_transport_args(args, _load_board_conf(_repo_root() / ".board.conf"))
 
 
+def load_board_conf() -> dict[str, str]:
+    """Return the parsed repo-root .board.conf, or an empty dict if missing."""
+    return _load_board_conf(_repo_root() / ".board.conf")
+
+
 def build_transport(args: argparse.Namespace) -> Transport:
-    resolve_args(args)
+    """Build the Transport for this invocation, with automatic fallback.
+
+    - If the caller passed --serial or --wifi, honour it exactly (no fallback).
+    - Otherwise: read .board.conf and try the preferred transport first. If it
+      fails (e.g. WiFi unreachable because the board has no IP, or the AP is
+      down), fall back to whichever other transport is configured.
+    """
     if args.serial:
         return SerialTransport(args.serial, baud=args.baud)
-    host, port = parse_wifi_target(args.wifi)
-    return WifiTransport(host, port)
+    if args.wifi:
+        host, port = parse_wifi_target(args.wifi)
+        return WifiTransport(host, port)
+
+    conf = load_board_conf()
+    default = conf.get("DEFAULT_TRANSPORT", "").strip().lower()
+    wifi_target = conf.get("WIFI_TARGET", "").strip()
+    serial_port = conf.get("SERIAL_PORT", "").strip()
+
+    if default == "serial":
+        attempts: list[tuple[str, str]] = [("serial", serial_port), ("wifi", wifi_target)]
+    else:
+        # Covers default == "wifi" and the unset case.
+        attempts = [("wifi", wifi_target), ("serial", serial_port)]
+
+    last_err: Optional[Exception] = None
+    for kind, target in attempts:
+        if not target:
+            continue
+        try:
+            if kind == "wifi":
+                host, port = parse_wifi_target(target)
+                print(f"Trying WiFi at {target}...", file=sys.stderr)
+                return WifiTransport(host, port)
+            print(f"Using serial {target}.", file=sys.stderr)
+            return SerialTransport(target, baud=args.baud)
+        except OSError as e:
+            print(f"  {kind} connect failed: {e}; trying next transport.", file=sys.stderr)
+            last_err = e
+
+    if last_err is not None:
+        raise SystemExit(f"No usable transport: all attempts failed. Last error: {last_err}")
+    raise SystemExit(
+        "No --serial/--wifi given and .board.conf has neither SERIAL_PORT nor "
+        "WIFI_TARGET set. Run firmware/bridge/setup_board.py or pass --serial/--wifi."
+    )

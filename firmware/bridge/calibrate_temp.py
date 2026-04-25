@@ -19,7 +19,7 @@ import argparse
 import sys
 
 from calibrate import SensorSpec, run_calibration  # pyright: ignore[reportMissingImports]
-from transport import add_transport_args, build_transport, resolve_args  # pyright: ignore[reportMissingImports]
+from transport import add_transport_args, build_transport  # pyright: ignore[reportMissingImports]
 
 
 SPEC = SensorSpec(
@@ -36,10 +36,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Interactive thermistor calibration (1-point offset)")
     add_transport_args(parser)
     args = parser.parse_args()
-    resolve_args(args)
 
-    target = f"serial {args.serial}" if args.serial else f"wifi {args.wifi}"
-    print(f"Connecting to board ({target})...")
+    print("Connecting to board...")
     try:
         transport = build_transport(args)
     except Exception as e:

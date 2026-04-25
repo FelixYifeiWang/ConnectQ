@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from transport import Transport, add_transport_args, build_transport, resolve_args  # pyright: ignore[reportMissingImports]
+from transport import Transport, add_transport_args, build_transport  # pyright: ignore[reportMissingImports]
 
 
 REPORT_START = "====== SENSOR REPORT ======"
@@ -350,10 +350,8 @@ def main() -> int:
     add_transport_args(parser)
     parser.add_argument("--timeout", type=float, default=5.0, help="Seconds to wait for first sensor report (default 5)")
     args = parser.parse_args()
-    resolve_args(args)
 
-    target = f"serial {args.serial}" if args.serial else f"wifi {args.wifi}"
-    print(f"Connecting to board ({target})...")
+    print("Connecting to board...")
     try:
         transport = build_transport(args)
     except Exception as e:
