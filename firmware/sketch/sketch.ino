@@ -55,22 +55,32 @@ const uint32_t OUT_PWM_PERIOD_US = 20000; // 1/50 Hz
 // Fixed divider resistor for thermistor
 const float SERIES_RESISTOR = 220000.0;
 
-// Calibrated nominal thermistor resistance at 25C
-const float THERMISTOR_NOMINAL = 1000000.0;
-
-// Reference temperature
-const float TEMPERATURE_NOMINAL = 25.0;
-
-// Beta value estimate
-const float BETA_VALUE = 3950.0;
+// Steinhart-Hart 3-coefficient fit derived from three bench measurements:
+//   23.0 °C -> 1.000 MΩ
+//   20.4 °C -> 1.380 MΩ
+//   36.3 °C -> 0.516 MΩ
+// Solving 1/T(K) = A + B·ln(R) + C·(ln R)^3 through those three points.
+// Fits all three within ~0.25 °C; the previous β-equation was off by up to 4 °C
+// at body-temp range.
+const float STEINHART_A = -1.5030e-2f;
+const float STEINHART_B =  1.9309e-3f;
+const float STEINHART_C = -3.1369e-6f;
 
 // ===================== Moisture sensor calibration =====================
 // Fixed divider resistor for moisture sensor
-const float MOIST_SERIES_RESISTOR = 560000.0;
+const float MOIST_SERIES_RESISTOR = 39000.0;
 
-// Moisture reference points based on your measurements
-const float MOIST_RES_WET = 100000.0;      // heavily moistened
-const float MOIST_RES_DAMP = 1000000.0;    // slightly moistened
+// Slope from two bench measurements of this fabric on skin:
+//   22 kΩ -> 49.0 %
+//   80 kΩ -> 73.5 %
+// dR = 58 kΩ, d% = 24.5  ->  ~0.4224 %/kΩ
+const float MOIST_PCT_PER_OHM = (73.5f - 49.0f) / (80000.0f - 22000.0f);
+
+// Baseline anchor: on boot, the first N readings are averaged and treated as
+// "regular skin moisture". The percent curve is then drawn through that point
+// using MOIST_PCT_PER_OHM as the slope.
+const float MOIST_BASELINE_PCT     = 40.0f;
+const int   MOIST_BASELINE_SAMPLES = 5;
 
 // ADC settings
 const float ADC_MAX = 4095.0;
@@ -82,6 +92,11 @@ const float VREF = 3.3;
 float g_temp_offset = 0.0f;
 float g_moist_offset = 0.0f;
 float g_heart_offset = 0.0f;
+
+// Runtime moisture baseline — captured from the first N readings after boot.
+float g_moist_baseline_r   = 0.0f;
+float g_moist_baseline_sum = 0.0f;
+int   g_moist_baseline_count = 0;
 
 // ===================== Heart rate sensor (MAX30102) =====================
 // Optional sensor wired over I2C (SDA/SCL on Feather defaults). If absent at
@@ -134,15 +149,11 @@ float readThermistorResistance() {
 float readTemperatureC() {
   float R = readThermistorResistance();
 
-  float steinhart;
-  steinhart = R / THERMISTOR_NOMINAL;
-  steinhart = log(steinhart);
-  steinhart /= BETA_VALUE;
-  steinhart += 1.0 / (TEMPERATURE_NOMINAL + 273.15);
-  steinhart = 1.0 / steinhart;
-  steinhart -= 273.15;
+  float lnR  = logf(R);
+  float invT = STEINHART_A + STEINHART_B * lnR + STEINHART_C * lnR * lnR * lnR;
+  float tempK = 1.0f / invT;
 
-  return steinhart + g_temp_offset;
+  return (tempK - 273.15f) + g_temp_offset;
 }
 
 // ===================== Moisture functions =====================
@@ -162,7 +173,7 @@ float readMoistureResistance() {
   if (raw >= 4095) raw = 4094;
 
   // Divider:
-  // 3.3V -- 560k -- ADC node -- moisture sensor -- GND
+  // 3.3V -- 39k -- ADC node -- moisture sensor -- GND
   float resistance = MOIST_SERIES_RESISTOR * ((float)raw / (ADC_MAX - raw));
   return resistance;
 }
@@ -170,16 +181,26 @@ float readMoistureResistance() {
 float readMoisturePercent() {
   float R = readMoistureResistance();
 
-  // Clamp rough range:
-  // 100k  -> 100% wet
-  // 1M    -> 0% wet
-  float percent = 100.0 * (MOIST_RES_DAMP - R) / (MOIST_RES_DAMP - MOIST_RES_WET);
+  // Warm-up: average the first MOIST_BASELINE_SAMPLES reads and treat that
+  // resistance as MOIST_BASELINE_PCT (regular skin moisture). During warm-up
+  // we just report the baseline value so the curve is consistent.
+  if (g_moist_baseline_count < MOIST_BASELINE_SAMPLES) {
+    g_moist_baseline_sum += R;
+    g_moist_baseline_count++;
+    if (g_moist_baseline_count == MOIST_BASELINE_SAMPLES) {
+      g_moist_baseline_r = g_moist_baseline_sum / MOIST_BASELINE_SAMPLES;
+    }
+    float warm = MOIST_BASELINE_PCT + g_moist_offset;
+    if (warm > 100.0f) warm = 100.0f;
+    if (warm < 0.0f) warm = 0.0f;
+    return warm;
+  }
 
-  percent += g_moist_offset;  // user calibration
+  float percent = MOIST_BASELINE_PCT + MOIST_PCT_PER_OHM * (R - g_moist_baseline_r);
+  percent += g_moist_offset;
 
-  if (percent > 100.0) percent = 100.0;
-  if (percent < 0.0) percent = 0.0;
-
+  if (percent > 100.0f) percent = 100.0f;
+  if (percent < 0.0f) percent = 0.0f;
   return percent;
 }
 
@@ -278,10 +299,33 @@ void serviceHeater() {
 }
 
 // ===================== Heart rate (MAX30102) =====================
+// Flip to true once the MAX30102 is physically wired with 4.7k pull-ups on
+// SDA/SCL. Left false by default so boot can't hang on an empty I2C bus.
+const bool HR_ENABLED = false;
+
 void setupHeartRate() {
+  if (!HR_ENABLED) {
+    Serial.println("Heart rate disabled in firmware (HR_ENABLED=false).");
+    g_hr_available = false;
+    return;
+  }
+
   Wire.begin();
-  if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
+  Wire.setTimeOut(50);  // bound any transaction so a flaky device can't hang boot
+
+  // Quick ACK probe. If nothing answers at the MAX30102 address, skip the
+  // driver init — calling particleSensor.begin() on an empty bus can still
+  // block longer than the watchdog allows.
+  const uint8_t MAX30102_I2C_ADDR = 0x57;
+  Wire.beginTransmission(MAX30102_I2C_ADDR);
+  if (Wire.endTransmission() != 0) {
     Serial.println("MAX30102 not found on I2C — heart rate disabled.");
+    g_hr_available = false;
+    return;
+  }
+
+  if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
+    Serial.println("MAX30102 ACKed but begin() failed — heart rate disabled.");
     g_hr_available = false;
     return;
   }
@@ -562,9 +606,15 @@ void resetAllOutputs(Print& reply) {
   }
   stopBuzzer();
   heaterOff();
+
+  // Re-arm the moisture baseline so the next 5 reads re-anchor at 40%.
+  g_moist_baseline_r     = 0.0f;
+  g_moist_baseline_sum   = 0.0f;
+  g_moist_baseline_count = 0;
+
   reply.print("RESET all ");
   reply.print(OUT_RESET_US);
-  reply.println("us");
+  reply.println("us moist_baseline=rearm");
 }
 
 void handleCommand(char c, Print& reply) {
@@ -684,23 +734,36 @@ void serviceInput() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
+  Serial.println("[boot] A: Serial up (rev3 hr-bypass)");
 
   pinMode(MOTOR_PIN, OUTPUT);
   digitalWrite(MOTOR_PIN, LOW);
+  Serial.println("[boot] B: motor pin configured");
 
   analogReadResolution(12);
   analogSetPinAttenuation(THERM_PIN, ADC_11db);
   analogSetPinAttenuation(MOIST_PIN, ADC_11db);
+  Serial.println("[boot] C: analog configured");
 
   setupCommandOutputs();
+  Serial.println("[boot] D: command outputs (haptics+vent) attached");
+
   setupBuzzer();
+  Serial.println("[boot] E: buzzer attached");
+
   setupHeater();
+  Serial.println("[boot] F: heater pin configured");
+
   setupHeartRate();
+  Serial.println("[boot] G: heart rate init done");
+
   loadCalibration();
+  Serial.println("[boot] H: calibration loaded");
 
   Serial.println("Integrated Motor + Thermistor + Moisture + HR + Buzzer + Heater Test Starting...");
 
   beginWiFi();
+  Serial.println("[boot] I: wifi init done");
 }
 
 // ===================== Loop =====================
