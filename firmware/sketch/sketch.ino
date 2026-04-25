@@ -66,9 +66,14 @@ const float STEINHART_A = -1.5030e-2f;
 const float STEINHART_B =  1.9309e-3f;
 const float STEINHART_C = -3.1369e-6f;
 
+// Bench bias after the SH fit: the thermistor as installed reads ~1.5 °C low
+// versus a reference, likely due to placement / lead conduction. Applied in
+// addition to (and independent of) the user-tunable g_temp_offset.
+const float THERM_BIAS_C = 1.5f;
+
 // ===================== Moisture sensor calibration =====================
-// Fixed divider resistor for moisture sensor
-const float MOIST_SERIES_RESISTOR = 39000.0;
+// Fixed divider resistor for moisture sensor (47k pulldown to GND).
+const float MOIST_SERIES_RESISTOR = 47000.0;
 
 // Slope from two bench measurements of this fabric on skin:
 //   22 kΩ -> 49.0 %
@@ -140,9 +145,11 @@ float readThermistorResistance() {
   if (raw <= 0) raw = 1;
   if (raw >= 4095) raw = 4094;
 
-  // Divider:
-  // 3.3V -- 220k -- ADC node -- thermistor -- GND
-  float resistance = SERIES_RESISTOR * ((float)raw / (ADC_MAX - raw));
+  // Divider on this board (NTC on top, 220k pulldown):
+  // 3.3V -- thermistor -- ADC node -- 220k -- GND
+  // V_adc = 3.3 * R_series / (R_therm + R_series)
+  //   ->  R_therm = R_series * (ADC_MAX - raw) / raw
+  float resistance = SERIES_RESISTOR * ((float)(ADC_MAX - raw) / raw);
   return resistance;
 }
 
@@ -153,7 +160,7 @@ float readTemperatureC() {
   float invT = STEINHART_A + STEINHART_B * lnR + STEINHART_C * lnR * lnR * lnR;
   float tempK = 1.0f / invT;
 
-  return (tempK - 273.15f) + g_temp_offset;
+  return (tempK - 273.15f) + THERM_BIAS_C + g_temp_offset;
 }
 
 // ===================== Moisture functions =====================
@@ -172,9 +179,12 @@ float readMoistureResistance() {
   if (raw <= 0) raw = 1;
   if (raw >= 4095) raw = 4094;
 
-  // Divider:
-  // 3.3V -- 39k -- ADC node -- moisture sensor -- GND
-  float resistance = MOIST_SERIES_RESISTOR * ((float)raw / (ADC_MAX - raw));
+  // Divider on this board (fabric on top, 47k pulldown):
+  // 3.3V -- moisture sensor -- ADC node -- 47k -- GND
+  // V_adc = 3.3 * R_series / (R_fabric + R_series)
+  //   ->  R_fabric = R_series * (ADC_MAX - raw) / raw
+  // (open fabric in air pulls the node to GND -> ADC near 0, matching observed behavior.)
+  float resistance = MOIST_SERIES_RESISTOR * ((float)(ADC_MAX - raw) / raw);
   return resistance;
 }
 
