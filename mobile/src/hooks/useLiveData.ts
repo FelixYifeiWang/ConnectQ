@@ -14,6 +14,11 @@ export type LiveConnection = "disconnected" | "connecting" | "connected" | "erro
 const POLL_MS = 1000;
 const TREND_WINDOW = 7;
 
+// The thermistor reads skin temperature; the "core-temp" metric, its range,
+// and the alert thresholds are all on the body-core scale, so we add a fixed
+// offset on the way in. Display-only — the firmware report is unchanged.
+const SKIN_TO_CORE_OFFSET_C = 4.0;
+
 function blankMetrics(): Metric[] {
   return initialMetrics.map((m) => ({
     ...m,
@@ -25,7 +30,7 @@ function blankMetrics(): Metric[] {
 }
 
 function liveValueFor(id: string, report: SensorReport): number | null {
-  if (id === "core-temp") return Number(report.thermistorC.toFixed(1));
+  if (id === "core-temp") return Number((report.thermistorC + SKIN_TO_CORE_OFFSET_C).toFixed(1));
   if (id === "sweat") return Math.round(report.moisturePct);
   if (id === "heart-rate") return report.heartRateBpm;
   return null;
