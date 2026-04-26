@@ -31,7 +31,7 @@ Single ESP32 sketch. On boot it:
 
 - Initializes a motor on **GPIO 21** (toggles 1 s on / 1 s off — existing test pattern).
 - Reads a thermistor on **GPIO 34 / A2** and a resistive moisture sensor on **GPIO 39 / A3** (12-bit ADC, 11 dB attenuation, 16-sample average).
-- Reads a **MAX30102** pulse-ox on the Feather default I²C pins (**SDA / SCL**, 3V3, GND). Absent sensor is detected at boot — the rest of the firmware runs unchanged and the report emits `Status: no sensor`. The MAX30105 SparkFun library is auto-installed by `flash.sh`.
+- Reads a **MAX30102** pulse-ox on the Feather default I²C pins (**SDA / SCL**, 3V3, GND). Absent sensor is detected at boot — the rest of the firmware runs unchanged and the report emits `Status: no sensor`. The MAX30105 SparkFun library is auto-installed by `flash.sh`. ⚠️ **Flashing with HR enabled requires the Arduino IDE, not `flash.sh`** — see ["Heart-rate flashes" caveat](#️-heart-rate-flashes-use-the-arduino-ide-not-flashsh) below.
 - Attaches five servo-style PWM outputs (50 Hz, 16-bit) on **GPIO 12 / 13 / 27 / 32 / 33**, parked at 1500 µs.
 - Attaches a piezo buzzer on **A0 / GPIO 26** driven by LEDC tone generation — plays a non-blocking three-tone alert pattern on command `6`, silenced by `R`.
 - Drives a heating element on **GPIO 15** via a MOSFET gate — digital on/off on command `7`, with a 30 s auto-off safety timeout. `R` cuts it immediately.
@@ -178,6 +178,20 @@ Every script accepts explicit flags if you need to deviate from `.board.conf`:
 - `python3 -m unittest discover firmware/bridge` — hardware-free unit tests (parser + .board.conf loader)
 
 Prefer the Arduino IDE? Open `firmware/sketch/sketch.ino` and click Upload.
+
+### ⚠️ Heart-rate flashes: use the Arduino IDE, not `flash.sh`
+
+`./flash.sh` (and `arduino-cli` more generally) currently produces a binary that **hangs in `Wire.begin()` on this hardware** when `HR_ENABLED = true`. The bootloader's interrupt watchdog then fires, the chip resets, and you get a `TG1WDT_SYS_RESET` reboot loop before any sensor reading happens. The same source compiled by **Arduino IDE** (Mac or Windows) does **not** hang — `Wire.begin()` returns and HR initializes normally.
+
+This is a known and reproducible behaviour: `arduino-cli` and the Arduino IDE can produce non-identical binaries from the same FQBN + same source + same `esp32:esp32` core version, due to differences in default build properties, library resolution paths, and library installs. Combined with [a long-standing I²C semaphore deadlock](https://github.com/espressif/arduino-esp32/issues/7209) in the ESP32 Wire library, the CLI binary takes a code path that wedges and the IDE binary takes one that doesn't.
+
+Practical workflow:
+
+- **Day-to-day flashes (HR off, or any non-HR work)** — keep using `./flash.sh`. It's faster and works for everything else.
+- **Flashing with `HR_ENABLED = true`** — open `firmware/sketch/sketch.ino` in the Arduino IDE and click Upload. The IDE-built binary is the only path on this Mac that survives `Wire.begin()`. Windows IDE works too.
+- After flashing via the IDE, all the laptop scripts (`controller.py`, `diagnose.py`, `monitor.py`, `calibrate_*.py`) still work unchanged — they only care about the running firmware, not how it got flashed.
+
+If you only ever flash via the IDE, you can ignore `flash.sh` entirely.
 
 ## Calibrating sensors
 

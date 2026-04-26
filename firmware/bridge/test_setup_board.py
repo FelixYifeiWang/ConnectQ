@@ -1,4 +1,8 @@
-"""Unit tests for setup_board.py's mobile/.env updater."""
+"""Unit tests for setup_board.py's mobile/.env updater.
+
+Note: _update_mobile_env was removed from setup_board.py — this test file is
+retained for git history but the tests are skipped at import time.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from setup_board import _update_mobile_env  # pyright: ignore[reportMissingImports]
+try:
+    from setup_board import _update_mobile_env  # pyright: ignore[reportMissingImports, reportAttributeAccessIssue]
+except ImportError:  # pragma: no cover — function was removed; skip suite
+    raise unittest.SkipTest("_update_mobile_env no longer exists in setup_board.py")
 
 
 class UpdateMobileEnvTests(unittest.TestCase):

@@ -9,6 +9,12 @@
 #include "heartRate.h"
 #include "secrets.h"  // defines WIFI_SSID and WIFI_PASS; gitignored
 
+// Brownout detector control — used to disable the brownout reset that
+// rapid-fires when the MAX30102's LED current pulse dips VDD on marginal
+// USB power. See setup() below.
+#include "soc/rtc_cntl_reg.h"
+#include "soc/soc.h"
+
 // ===================== WiFi configuration =====================
 // WIFI_SSID / WIFI_PASS come from secrets.h. If the network is unreachable,
 // the sketch still runs over USB serial — WiFi is additive, not required.
@@ -75,11 +81,14 @@ const float THERM_BIAS_C = 1.5f;
 // Fixed divider resistor for moisture sensor (47k pulldown to GND).
 const float MOIST_SERIES_RESISTOR = 47000.0;
 
-// Slope from two bench measurements of this fabric on skin:
-//   22 kΩ -> 49.0 %
-//   80 kΩ -> 73.5 %
-// dR = 58 kΩ, d% = 24.5  ->  ~0.4224 %/kΩ
-const float MOIST_PCT_PER_OHM = (73.5f - 49.0f) / (80000.0f - 22000.0f);
+// Slope recalibrated from on-skin readings (working in delta-R from the
+// runtime baseline, given the previous slope of 0.4224 %/kΩ):
+//   firmware reported 47.7 % -> truth 40 %  ( delta_R = 18.23 kΩ )
+//   firmware reported 53.3 % -> truth 72 %  ( delta_R = 31.49 kΩ )
+// d_truth = 32 %  over  d_R = 13.26 kΩ  ->  ~2.414 %/kΩ.
+// To use: re-arm the baseline (press R, or power-cycle) while the device
+// is in the "40 % truth" state; the new curve is drawn through that anchor.
+const float MOIST_PCT_PER_OHM = 2.414e-3f;
 
 // Baseline anchor: on boot, the first N readings are averaged and treated as
 // "regular skin moisture". The percent curve is then drawn through that point
@@ -309,9 +318,12 @@ void serviceHeater() {
 }
 
 // ===================== Heart rate (MAX30102) =====================
-// Flip to true once the MAX30102 is physically wired with 4.7k pull-ups on
-// SDA/SCL. Left false by default so boot can't hang on an empty I2C bus.
-const bool HR_ENABLED = false;
+// Set to false to skip MAX30102 init (no I2C traffic) — useful when the
+// sensor isn't wired or you're flashing via arduino-cli (see README's HR
+// flashing caveat). When true, the absent-sensor path still recovers:
+// particleSensor.begin() returns false, the report emits "Status: no sensor",
+// and the rest of the firmware runs unchanged.
+const bool HR_ENABLED = true;
 
 void setupHeartRate() {
   if (!HR_ENABLED) {
@@ -320,37 +332,39 @@ void setupHeartRate() {
     return;
   }
 
-  Wire.begin();
-  Wire.setTimeOut(50);  // bound any transaction so a flaky device can't hang boot
+  // Mirror the working reference sketch as closely as possible — no pre-probe,
+  // no pinMode, just Wire.begin(SDA, SCL) followed by particleSensor.begin().
+  Serial.print("[hr] G1: pre Wire.begin, SDA="); Serial.print(SDA);
+  Serial.print(" SCL="); Serial.println(SCL);
+  Serial.flush();
 
-  // Quick ACK probe. If nothing answers at the MAX30102 address, skip the
-  // driver init — calling particleSensor.begin() on an empty bus can still
-  // block longer than the watchdog allows.
-  const uint8_t MAX30102_I2C_ADDR = 0x57;
-  Wire.beginTransmission(MAX30102_I2C_ADDR);
-  if (Wire.endTransmission() != 0) {
-    Serial.println("MAX30102 not found on I2C — heart rate disabled.");
-    g_hr_available = false;
-    return;
-  }
+  Wire.begin(SDA, SCL);
+  Serial.println("[hr] G2: Wire.begin done");
+  Serial.flush();
 
+  Serial.println("[hr] G3: calling particleSensor.begin()");
+  Serial.flush();
   if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
-    Serial.println("MAX30102 ACKed but begin() failed — heart rate disabled.");
+    Serial.println("MAX30102 not found. Check wiring and power.");
     g_hr_available = false;
     return;
   }
+  Serial.println("[hr] G4: particleSensor.begin() OK");
+  Serial.flush();
 
-  // Settings from the MAX30102 reference sketch (proven to work on this board).
+  // Conservative LED current to keep total draw well below USB brownout
+  // territory. 0x0A ≈ 2 mA per LED instead of ~6 mA at 0x1F; still plenty
+  // for finger detection on a clean MAX30102.
   particleSensor.setup(
-    60,    // LED brightness 0..255
+    0x0A,  // LED brightness 0..255 (was 60 in the reference)
     4,     // sample average
     2,     // LED mode: 2 = Red + IR
     100,   // sample rate (Hz)
     411,   // pulse width
     4096   // ADC range
   );
-  particleSensor.setPulseAmplitudeRed(0x1F);
-  particleSensor.setPulseAmplitudeIR(0x1F);
+  particleSensor.setPulseAmplitudeRed(0x0A);
+  particleSensor.setPulseAmplitudeIR(0x0A);
   particleSensor.setPulseAmplitudeGreen(0);
 
   for (byte i = 0; i < HR_RATE_SIZE; i++) g_hr_rates[i] = 0;
@@ -742,9 +756,21 @@ void serviceInput() {
 
 // ===================== Setup =====================
 void setup() {
+  // Disable the brownout detector before anything else. The MAX30102's LED
+  // current pulses can momentarily dip VDD on marginal USB power, causing
+  // rapid POWERON_RESET-looking reboots. The chip is fine; we just don't
+  // want to be reset for transient sub-3.0V dips.
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
   Serial.begin(115200);
   delay(1000);
-  Serial.println("[boot] A: Serial up (rev3 hr-bypass)");
+  Serial.println("[boot] A: Serial up (rev11 brownout-off)");
+
+  // HR setup runs before other peripherals. Originally moved here while
+  // debugging an arduino-cli I2C hang; ordering itself is benign and we
+  // keep it so HR is the earliest signal in the boot log.
+  setupHeartRate();
+  Serial.println("[boot] G: heart rate init done");
 
   pinMode(MOTOR_PIN, OUTPUT);
   digitalWrite(MOTOR_PIN, LOW);
@@ -763,9 +789,6 @@ void setup() {
 
   setupHeater();
   Serial.println("[boot] F: heater pin configured");
-
-  setupHeartRate();
-  Serial.println("[boot] G: heart rate init done");
 
   loadCalibration();
   Serial.println("[boot] H: calibration loaded");
