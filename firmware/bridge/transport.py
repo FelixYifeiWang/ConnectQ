@@ -43,8 +43,13 @@ class SerialTransport:
 
 class WifiTransport:
     def __init__(self, host: str, port: int) -> None:
-        self._sock = socket.create_connection((host, port), timeout=5)
-        self._sock.setblocking(False)
+        sock = socket.create_connection((host, port), timeout=5)
+        try:
+            sock.setblocking(False)
+        except OSError:
+            sock.close()  # don't leak the FD if setblocking fails
+            raise
+        self._sock = sock
 
     def send(self, data: bytes) -> None:
         self._sock.sendall(data)

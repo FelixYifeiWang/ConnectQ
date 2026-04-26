@@ -127,6 +127,16 @@ float g_hr_bpm = 0.0f;
 int   g_hr_bpm_avg = 0;
 long  g_hr_last_ir = 0;
 
+// Runtime tracking switch — controls whether serviceHeartRate samples the
+// sensor and whether the LEDs are illuminated. Independent from the
+// compile-time HR_ENABLED gate (which decides whether I2C is brought up at
+// boot at all). Persisted to NVS so it survives reboots.
+bool g_hr_tracking_on = true;
+
+// LED amplitude used when tracking is active. Single source of truth so the
+// runtime toggle can restore the configured level when re-enabling.
+const uint8_t HR_LED_AMPLITUDE_ON = 0x0A;
+
 const long HR_FINGER_IR_THRESHOLD = 50000;  // below this, treat as "no finger"
 
 // ===================== Timing =====================
@@ -332,42 +342,39 @@ void setupHeartRate() {
     return;
   }
 
-  // Mirror the working reference sketch as closely as possible — no pre-probe,
-  // no pinMode, just Wire.begin(SDA, SCL) followed by particleSensor.begin().
-  Serial.print("[hr] G1: pre Wire.begin, SDA="); Serial.print(SDA);
+  // Mirror the working reference sketch — no pre-probe, no pinMode, just
+  // Wire.begin(SDA, SCL) followed by particleSensor.begin(). Print which pins
+  // we ended up using so a Feather variant mismatch is visible at boot.
+  Serial.print("[hr] init on SDA="); Serial.print(SDA);
   Serial.print(" SCL="); Serial.println(SCL);
-  Serial.flush();
 
   Wire.begin(SDA, SCL);
-  Serial.println("[hr] G2: Wire.begin done");
-  Serial.flush();
 
-  Serial.println("[hr] G3: calling particleSensor.begin()");
-  Serial.flush();
   if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
     Serial.println("MAX30102 not found. Check wiring and power.");
     g_hr_available = false;
     return;
   }
-  Serial.println("[hr] G4: particleSensor.begin() OK");
-  Serial.flush();
 
   // Conservative LED current to keep total draw well below USB brownout
   // territory. 0x0A ≈ 2 mA per LED instead of ~6 mA at 0x1F; still plenty
   // for finger detection on a clean MAX30102.
   particleSensor.setup(
-    0x0A,  // LED brightness 0..255 (was 60 in the reference)
+    HR_LED_AMPLITUDE_ON,  // LED brightness 0..255 (was 60 in the reference)
     4,     // sample average
     2,     // LED mode: 2 = Red + IR
     100,   // sample rate (Hz)
     411,   // pulse width
     4096   // ADC range
   );
-  particleSensor.setPulseAmplitudeRed(0x0A);
-  particleSensor.setPulseAmplitudeIR(0x0A);
+  // If runtime tracking is off (loaded from NVS), park LEDs at 0 so the
+  // sensor draws minimal current until the user re-enables tracking.
+  uint8_t amp = g_hr_tracking_on ? HR_LED_AMPLITUDE_ON : 0;
+  particleSensor.setPulseAmplitudeRed(amp);
+  particleSensor.setPulseAmplitudeIR(amp);
   particleSensor.setPulseAmplitudeGreen(0);
 
-  for (byte i = 0; i < HR_RATE_SIZE; i++) g_hr_rates[i] = 0;
+  // g_hr_rates is a global, already zero-initialized at boot; no need to clear.
   g_hr_available = true;
   Serial.println("MAX30102 initialised — heart rate sensor active.");
 }
@@ -376,6 +383,14 @@ void setupHeartRate() {
 // 100 Hz internally; checkForBeat() needs frequent samples to detect peaks.
 void serviceHeartRate() {
   if (!g_hr_available) return;
+
+  if (!g_hr_tracking_on) {
+    // Tracking disabled at runtime — keep state quiet and skip sensor I/O.
+    g_hr_bpm = 0.0f;
+    g_hr_bpm_avg = 0;
+    g_hr_last_ir = 0;
+    return;
+  }
 
   long ir = particleSensor.getIR();
   g_hr_last_ir = ir;
@@ -394,7 +409,9 @@ void serviceHeartRate() {
 
     if (delta > 0) {
       float bpm = 60000.0f / (float)delta;
-      if (bpm > 20.0f && bpm < 255.0f) {
+      // 30..220 BPM covers everything from deep sleep to peak exercise; the
+      // reference's 20..255 was loose enough to admit beat-detector noise.
+      if (bpm > 30.0f && bpm < 220.0f) {
         g_hr_bpm = bpm;
         g_hr_rates[g_hr_rate_spot++] = (byte)bpm;
         g_hr_rate_spot %= HR_RATE_SIZE;
@@ -427,9 +444,11 @@ void loadCalibration() {
   g_temp_offset  = g_cal_prefs.getFloat("temp_off",  0.0f);
   g_moist_offset = g_cal_prefs.getFloat("moist_off", 0.0f);
   g_heart_offset = g_cal_prefs.getFloat("heart_off", 0.0f);
+  g_hr_tracking_on = g_cal_prefs.getBool("hr_track", true);
   g_cal_prefs.end();
-  Serial.printf("Calibration loaded: temp_off=%.2f moist_off=%.2f heart_off=%.2f\n",
-                g_temp_offset, g_moist_offset, g_heart_offset);
+  Serial.printf("Calibration loaded: temp_off=%.2f moist_off=%.2f heart_off=%.2f hr_track=%s\n",
+                g_temp_offset, g_moist_offset, g_heart_offset,
+                g_hr_tracking_on ? "on" : "off");
 }
 
 void saveCalibration() {
@@ -437,6 +456,7 @@ void saveCalibration() {
   g_cal_prefs.putFloat("temp_off",  g_temp_offset);
   g_cal_prefs.putFloat("moist_off", g_moist_offset);
   g_cal_prefs.putFloat("heart_off", g_heart_offset);
+  g_cal_prefs.putBool("hr_track",   g_hr_tracking_on);
   g_cal_prefs.end();
 }
 
@@ -479,18 +499,19 @@ String buildReport() {
   s += "------ Heart Rate ------\n";
   if (!g_hr_available) {
     s += "Status: no sensor\n";
+  } else if (!g_hr_tracking_on) {
+    s += "Status: tracking off\n";
   } else {
     // Apply HR offset only when we have an actual beat — otherwise the
     // "no finger" 0-reading would get shifted to a fake value.
     float reported_bpm = (g_hr_bpm > 0.0f) ? (g_hr_bpm + g_heart_offset) : 0.0f;
-    int reported_avg = (g_hr_bpm_avg > 0) ? (g_hr_bpm_avg + (int)g_heart_offset) : 0;
+    // Round (rather than truncate) when applying the offset to the integer
+    // average so a non-integer offset like +2.5 BPM doesn't bias downward.
+    int reported_avg = (g_hr_bpm_avg > 0) ? (g_hr_bpm_avg + (int)lroundf(g_heart_offset)) : 0;
 
     s += "IR: "; s += g_hr_last_ir; s += "\n";
     s += "BPM: "; s += String(reported_bpm, 1); s += "\n";
     s += "Avg BPM: "; s += reported_avg; s += "\n";
-    s += "Finger: ";
-    s += (g_hr_last_ir >= HR_FINGER_IR_THRESHOLD) ? "yes" : "no";
-    s += "\n";
   }
 
   s += "------------------------\n";
@@ -670,8 +691,51 @@ void handleCommand(char c, Print& reply) {
 // Single-char commands still dispatch immediately when the buffer is empty,
 // so existing keystroke forwarders (controller.py) keep working unchanged.
 
+// Helper: apply runtime HR-tracking state and emit a one-line ack.
+//   `set` selects the action: 1 = turn on, 0 = turn off, -1 = query only.
+// Reply format mirrors the calibration acks: `HR ok tracking=<on|off>` after a
+// set, or `HR tracking=<on|off>` after a query. Parsed by hr_toggle.py.
+static void applyHrTracking(int set, Print& reply) {
+  if (set >= 0) {
+    bool desired = (set != 0);
+    if (desired != g_hr_tracking_on) {
+      g_hr_tracking_on = desired;
+      saveCalibration();
+      // Push the new state into the LED amplitude immediately so the change
+      // is visible/effective before the next sensor poll.
+      if (g_hr_available) {
+        uint8_t amp = g_hr_tracking_on ? HR_LED_AMPLITUDE_ON : 0;
+        particleSensor.setPulseAmplitudeRed(amp);
+        particleSensor.setPulseAmplitudeIR(amp);
+      }
+    }
+    reply.print("HR ok tracking=");
+  } else {
+    reply.print("HR tracking=");
+  }
+  reply.println(g_hr_tracking_on ? "on" : "off");
+}
+
 void handleLineCommand(const char* cmd, uint8_t len, Print& reply) {
-  if (len < 2 || cmd[0] != 'C') return;  // not a calibration command
+  if (len < 2) return;
+
+  // ---- Runtime HR tracking control: `HR 1`, `HR 0`, `HR ?`. ----
+  if (cmd[0] == 'H' && cmd[1] == 'R') {
+    // Skip whitespace after "HR".
+    uint8_t i = 2;
+    while (i < len && (cmd[i] == ' ' || cmd[i] == '\t')) i++;
+    if (i >= len || cmd[i] == '?') {
+      applyHrTracking(-1, reply);
+    } else if (cmd[i] == '1') {
+      applyHrTracking(1, reply);
+    } else if (cmd[i] == '0') {
+      applyHrTracking(0, reply);
+    }
+    // Silently ignore malformed HR commands.
+    return;
+  }
+
+  if (cmd[0] != 'C') return;  // not a calibration command
   char op = cmd[1];
 
   if (op == 'C') {  // CC — clear all offsets

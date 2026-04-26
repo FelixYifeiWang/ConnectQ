@@ -215,6 +215,25 @@ Low-level commands (also work from a raw serial terminal):
 | `CG` | print current offsets |
 | `CC` | clear all three to zero |
 
+## Toggling heart-rate tracking at runtime
+
+Heart-rate tracking can be turned on or off without reflashing. The state lives in the same `sixth_cal` NVS namespace and survives reboots.
+
+```bash
+python3 firmware/bridge/hr_toggle.py on        # enable
+python3 firmware/bridge/hr_toggle.py off       # disable (LEDs go to 0 amplitude)
+python3 firmware/bridge/hr_toggle.py status    # query (default if no arg)
+python3 firmware/bridge/hr_toggle.py           # same as status
+```
+
+When tracking is off the report's Heart Rate section reads `Status: tracking off` and BPM/Avg BPM are not emitted. This is independent of the compile-time `HR_ENABLED` flag in `sketch.ino` — that one decides whether the MAX30102 is initialized at boot at all. If `HR_ENABLED = false`, this script can't bring the sensor online.
+
+| Command | Effect |
+| ------- | ------ |
+| `HR 1` | tracking on |
+| `HR 0` | tracking off |
+| `HR ?` | print current tracking state |
+
 ## Known gaps
 
 See `TODO.md`.

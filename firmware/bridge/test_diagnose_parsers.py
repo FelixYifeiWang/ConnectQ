@@ -51,7 +51,6 @@ Moisture: 42.1 %
 IR: 123456
 BPM: 72.3
 Avg BPM: 71
-Finger: yes
 ------------------------"""
 
 
@@ -68,6 +67,22 @@ Resistance: 186667 ohms
 Moisture: 42.1 %
 ------ Heart Rate ------
 Status: no sensor
+------------------------"""
+
+
+SAMPLE_REPORT_HR_TRACKING_OFF = """====== SENSOR REPORT ======
+------ Thermistor ------
+ADC raw: 2048
+Voltage: 1.650 V
+Resistance: 220000 ohms
+Temp: 25.00 °C  |  77.00 °F
+------ Moisture ------
+ADC raw: 1024
+Voltage: 0.825 V
+Resistance: 186667 ohms
+Moisture: 42.1 %
+------ Heart Rate ------
+Status: tracking off
 ------------------------"""
 
 
@@ -132,6 +147,15 @@ class ParseReportTests(unittest.TestCase):
         self.assertIsNone(r.heart_avg)
         self.assertAlmostEqual(r.temp_c, 25.0)
         self.assertAlmostEqual(r.moist_pct, 42.1)
+
+    def test_hr_section_tracking_off_yields_none(self):
+        # "Status: tracking off" (runtime toggle via hr_toggle.py) — same
+        # treatment as no-sensor: BPM fields stay None, others parse.
+        r = parse_report(SAMPLE_REPORT_HR_TRACKING_OFF)
+        assert r is not None
+        self.assertIsNone(r.heart_bpm)
+        self.assertIsNone(r.heart_avg)
+        self.assertAlmostEqual(r.temp_c, 25.0)
 
 
 class PlausibilityTests(unittest.TestCase):

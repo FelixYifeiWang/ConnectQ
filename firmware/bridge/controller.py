@@ -60,7 +60,12 @@ def main() -> int:
     add_transport_args(parser)
     args = parser.parse_args()
 
-    transport = build_transport(args)
+    try:
+        transport = build_transport(args)
+    except Exception as e:
+        print(f"FAIL connect: {e}", file=sys.stderr)
+        return 1
+
     try:
         run(transport)
     except KeyboardInterrupt:

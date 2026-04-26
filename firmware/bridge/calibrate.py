@@ -144,7 +144,9 @@ def run_calibration(transport: Transport, spec: SensorSpec, timeout_s: float = 5
         print("FAIL no CAL response from CG within 2s")
         return 1
     existing_offsets = parse_cal_get(get_line)
-    assert existing_offsets is not None  # wait_for_line only returns on match
+    if existing_offsets is None:  # belt-and-braces — wait_for_line should only return on match
+        print("FAIL CAL response could not be parsed")
+        return 1
     existing = existing_offsets[spec.ack_field]
 
     delta = compute_offset(reported=current, reference=reference)
@@ -164,7 +166,9 @@ def run_calibration(transport: Transport, spec: SensorSpec, timeout_s: float = 5
         print("FAIL no CAL ack within 2s")
         return 1
     ack = parse_cal_ack(ack_line)
-    assert ack is not None  # wait_for_line only returns on match
+    if ack is None:  # belt-and-braces — wait_for_line should only return on match
+        print("FAIL ack line could not be parsed")
+        return 1
     print(f"  {ack_line.strip()}")
     if ack[0] != spec.ack_field:
         print(f"FAIL ack was for {ack[0]}, expected {spec.ack_field}")
